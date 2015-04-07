@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, sqldb, db, FileUtil, Forms, Controls, Graphics, Dialogs,
-  DBGrids, DbCtrls, Menus, UMetaData;
+  DBGrids, DbCtrls, Menus, UMetaData, USQLRequest;
 
 type
 
@@ -42,7 +42,8 @@ begin
           Name := Tables.TablesInf[ATag].Name;
 
           SQLQuery.Active := False;
-          SQLQuery.SQL.Text := 'Select * From ' +  Name;
+          SQLQuery.SQL.Text := SQLRequest.ChangeQuery(ATag);
+          //SQLQuery.SQL.Text := 'Select * From ' +  Name;
           SQLQuery.Active := True;
 
           ChangeColumns(ATag);
@@ -53,15 +54,25 @@ end;
 
 procedure TListViewForm.ChangeColumns(ATag: Integer);
 var
-  i: Integer;
+  i, j: Integer;
 
 begin
+  i := 0;
+  j := 0;
   With Tables.TablesInf[ATag] do
-    for i := 0 to Length(Columns) - 1 do
+    While i <= High(Columns) do
       begin
-        DBGrid.Columns[i].FieldName := Columns[i].Name;
-        DBGrid.Columns[i].Title.Caption := Columns[i].Caption;
-        DBGrid.Columns[i].Width := Columns[i].Width;
+        DBGrid.Columns[j].Visible := Columns[i].Visible;
+        DBGrid.Columns[j].Title.Caption := Columns[i].Caption;
+        DBGrid.Columns[j].Width := Columns[i].Width;
+        if Columns[j].ReferenceTableName <> '' then
+          begin
+            inc(j);
+            DBGrid.Columns[j].Title.Caption := Columns[i].ReferenceColumnCaption;
+            DBGrid.Columns[j].Width := Columns[i].ReferenceColumnWidth;
+          end;
+        inc(i);
+        inc(j);
       end;
 end;
 
