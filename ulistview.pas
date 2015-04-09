@@ -19,6 +19,7 @@ type
     SQLQuery: TSQLQuery;
     constructor CreateAndShowForm(ATag: Integer);
     procedure ChangeColumns(ATag: Integer);
+    procedure DBGridTitleClick(Column: TColumn);
   end;
 
 var
@@ -40,11 +41,12 @@ begin
       Tag := ATag;
       Caption := Tables.TablesInf[ATag].Caption;
       Name := Tables.TablesInf[ATag].Name;
-
-      SQLQuery.Active := False;
-      SQLQuery.SQL.Text := SQLRequest.WriteQuery(ATag);
-      SQLQuery.Active := True;
-
+      With SQLQuery do
+      begin
+        Active := False;
+        SQL.Text := SQLRequest.WriteQuery(ATag);
+        Active := True;
+      end;
       ChangeColumns(ATag);
     end;
   end;
@@ -53,26 +55,50 @@ end;
 
 procedure TListViewForm.ChangeColumns(ATag: Integer);
 var
-  i, j: Integer;
+  i: Integer = 0;
+  j: Integer = 0;
 
 begin
-  i := 0;
-  j := 0;
   With Tables.TablesInf[ATag] do
     While i <= High(Columns) do
     begin
       DBGrid.Columns[j].Visible := Columns[i].Visible;
+      DBGrid.Columns[j].FieldName := Columns[i].Name;
       DBGrid.Columns[j].Title.Caption := Columns[i].Caption;
       DBGrid.Columns[j].Width := Columns[i].Width;
+      DBGrid.Columns[j].Tag := i;
       if Columns[j].ReferenceTableName <> '' then
       begin
         inc(j);
+        DBGrid.Columns[j].FieldName := Columns[i].ReferenceColumnSName;
         DBGrid.Columns[j].Title.Caption := Columns[i].ReferenceColumnCaption;
         DBGrid.Columns[j].Width := Columns[i].ReferenceColumnWidth;
+        DBGrid.Columns[j].Tag := i;
       end;
       inc(i);
       inc(j);
     end;
+end;
+
+procedure TListViewForm.DBGridTitleClick(Column: TColumn);
+var
+  AName: String;
+
+begin
+  With Tables.TablesInf[Tag] do
+  begin
+    if Columns[Column.Tag].ReferenceTableName <> '' then
+      AName := Columns[Column.Tag].ReferenceTableName + '.' + Column.FieldName
+    else
+      AName := Name + '.' + Column.FieldName;
+  end;
+  With SQLQuery do
+  begin
+    Active := False;
+    SQL.Text := SQLRequest.SortField(SQL.Text, AName);
+    Active := True;
+  end;
+  ChangeColumns(Tag);
 end;
 
 end.
