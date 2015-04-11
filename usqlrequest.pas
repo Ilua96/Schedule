@@ -14,6 +14,9 @@ type
   TSQLRequest = class
     function WriteQuery(ATag: Integer): String;
     function SortField(AText, AName: String): String;
+    function DeleteFilter(AText, AQuery: String): String;
+    function AddFilter(AText, AName, ASign, AParameter: String;
+      var AQuery: String): String;
   end;
 
 var
@@ -76,6 +79,50 @@ begin
         Result := AText;
       end;
   end;
+end;
+
+function TSQLRequest.AddFilter(AText, AName, ASign, AParameter: String;
+  var AQuery: String): String;
+begin
+  if AQuery <> '' then
+    Delete(AText, Pos(AQuery, AText), Length(AQuery));
+  if Pos('Order by', AText) = 0 then
+  begin
+    if Pos('Where', AText) = 0 then
+    begin
+      AQuery := 'Where ' + AName + ' ' + ASign + AParameter;
+      Result := AText + ' ' + AQuery;
+    end
+    else
+    begin
+      AQuery := 'And ' + AName + ' ' + ASign + AParameter;
+      Result := AText + ' ' + AQuery;
+    end;
+  end
+  else
+    if Pos('Where', AText) = 0 then
+    begin
+      AQuery := 'Where ' + AName + ' ' + ASign + AParameter;
+      Insert(AQuery + ' ', AText, Pos('Order by', AText));
+      Result := AText;
+    end
+    else
+    begin
+      AQuery := 'And ' + AName + ' ' + ASign + AParameter;
+      Insert(AQuery + ' ', AText, Pos('Order by', AText));
+      Result := AText;
+    end;
+end;
+
+function TSQLRequest.DeleteFilter(AText, AQuery: String): String;
+begin
+  Delete(AText, Pos(AQuery, AText), Length(AQuery));
+  if (Pos('And', AText) <> 0) and (Pos('Where', AText) = 0) then
+  begin
+    Insert('Where', AText, Pos('And', AText));
+    Delete(AText, Pos('And', AText), Length('And'));
+  end;
+  Result := AText;
 end;
 
 end.
