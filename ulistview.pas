@@ -13,6 +13,7 @@ type
   TFilterPanel = class(TPanel)
     NameComboBox: TComboBox;
     SignComboBox: TComboBox;
+    CancelButton: TButton;
     DeleteButton: TButton;
     ExecuteButton: TButton;
     ValueEdit: TEdit;
@@ -21,6 +22,7 @@ type
     function CreateButton(ALeft: Integer; ACaption: String): TButton;
     procedure ExecuteFilter(Sender: TObject);
     procedure ChangeValue(Sender: TObject);
+    procedure CancelFilter(Sender: TObject);
   private
     ActiveQuery: String;
   end;
@@ -29,18 +31,26 @@ type
 
   TListViewForm = class(TForm)
     AddFilterButton: TButton;
+    CancelFiltersButton: TButton;
+    DeleteFiltersButton: TButton;
+    ExecuteFiltersButton: TButton;
     DataSource: TDataSource;
     DBNavigator: TDBNavigator;
+    ScrollBox: TScrollBox;
     SQLQuery: TSQLQuery;
     DBGrid: TDBGrid;
     procedure AddFilterButtonClick(Sender: TObject);
+    procedure CancelFiltersButtonClick(Sender: TObject);
     procedure ChangeColumns(ATag: Integer);
     procedure DBGridTitleClick(Column: TColumn);
     procedure DeleteFilter(Sender: TObject; Button: TMouseButton;
                            Shift: TShiftState; X, Y: Integer);
     constructor CreateAndShowForm(ATag: Integer);
+    procedure DeleteFiltersButtonClick(Sender: TObject);
+    procedure ExecuteFiltersButtonClick(Sender: TObject);
   private
     FilterPanels: array of TFilterPanel;
+    ExecuteCount: Integer;
   end;
 
 
@@ -77,6 +87,25 @@ begin
     end;
   end;
   ListViewForm[ATag].Show;
+end;
+
+procedure TListViewForm.DeleteFiltersButtonClick(Sender: TObject);
+var
+  i: Integer;
+
+begin
+  for i := 0 to High(FilterPanels) do
+    DeleteFilter((FilterPanels[0].DeleteButton as TObject), mbLeft, [], 0, 0);
+  SetLength(FilterPanels, 0);
+end;
+
+procedure TListViewForm.ExecuteFiltersButtonClick(Sender: TObject);
+var
+  i: Integer;
+
+begin
+  for i := 0 to High(FilterPanels) do
+    FilterPanels[i].ExecuteFilter(Sender);;
 end;
 
 procedure TListViewForm.ChangeColumns(ATag: Integer);
@@ -134,20 +163,17 @@ var
                                               'Начинается с', 'Включает');
 
 begin
-  if Length(FilterPanels) = 15 then
-    exit;
   SetLength(FilterPanels, Length(FilterPanels) + 1);
   FilterPanels[High(FilterPanels)] := TFilterPanel.Create(Self);
   With FilterPanels[High(FilterPanels)] do
   begin
     Visible := True;
     Height := 32;
-    Width := 512;
-    Top := 44 + indent * High(FilterPanels);
-    Left := AddFilterButton.Left;
+    Width := 592;
+    Top := 5 + indent * High(FilterPanels);
+    Left := 10;
     Tag := High(FilterPanels);
-    Parent := Self;
-    Anchors := [akTop,akRight];
+    Parent := ScrollBox;
     Color := clRed;
 
     NameComboBox := CreateComboBox(6);
@@ -172,9 +198,20 @@ begin
     ExecuteButton := CreateButton(352, 'Выполнить');
     ExecuteButton.OnClick := @ExecuteFilter;
 
-    DeleteButton := CreateButton(432, 'Удалить');
+    CancelButton := CreateButton(432, 'Отменить');
+    CancelButton.OnClick := @CancelFilter;
+
+    DeleteButton := CreateButton(512, 'Удалить');
     DeleteButton.OnMouseUp := @DeleteFilter;
   end;
+end;
+
+procedure TListViewForm.CancelFiltersButtonClick(Sender: TObject);
+var
+  i: Integer;
+begin
+  for i := 0 to High(FilterPanels) do
+    FilterPanels[i].CancelFilter(Sender);
 end;
 
 procedure TListViewForm.DeleteFilter(Sender: TObject; Button: TMouseButton;
@@ -185,16 +222,7 @@ var
 begin
   ATag := (Sender as TButton).Parent.Tag;
   With FilterPanels[ATag] do
-    if ActiveQuery <> '' then
-    begin
-      With SQLQuery do
-      begin
-        Active := False;
-        SQL.Text := SQLRequest.DeleteFilter(SQL.Text, ActiveQuery);
-        Active := True;
-      end;
-    end;
-  ChangeColumns(Tag);
+    CancelFilter(Sender);
   FreeAndNil(FilterPanels[ATag]);
   for i := ATag to High(FilterPanels) - 1 do
   begin
@@ -205,17 +233,66 @@ begin
       Tag := Tag - 1;
     end;
   end;
-  if ATag <= High(FilterPanels) - 1 then
-    With FilterPanels[0] do
-      if Pos('And', ActiveQuery) = 1 then
-      begin
-        Insert('Where', ActiveQuery, Pos('And', ActiveQuery));
-        Delete(ActiveQuery, Pos('And', ActiveQuery), Length('And'));
-      end;
   SetLength(FilterPanels, Length(FilterPanels) - 1);
 end;
 
 { TFilterPanel }
+
+procedure TFilterPanel.CancelFilter(Sender: TObject);
+var
+  ATag, i, k: Integer;
+  m: Boolean;
+  c: Integer = -1;
+
+begin
+  if ActiveQuery = '' then
+    exit;
+  m := False;
+  ATag := Parent.Parent.Tag;
+  With ListViewForm[ATag].SQLQuery do
+  begin
+    Active := False;
+    SQL.Text := SQLRequest.DeleteFilter(SQL.Text, ActiveQuery);
+    Active := True;
+    ShowMessage(ActiveQuery);
+    ShowMessage(SQL.Text);
+  end;
+  k := ExecuteButton.Tag;
+  ExecuteButton.Tag := 0;
+  With ListViewForm[ATag] do
+  begin
+    Dec(ExecuteCount);
+    for i := 0 to High(FilterPanels) do
+      if FilterPanels[i].ExecuteButton.Tag = 1 then
+      begin
+        m := True;
+        Break;
+      end;
+    if not m then
+      for i := 0 to High(FilterPanels) do
+        if FilterPanels[i].ExecuteButton.Tag = 2 then
+        begin
+          c := i;
+          Break;
+        end;
+    if (c <> -1) and (not m) then
+    begin
+      With FilterPanels[c] do
+      begin
+        Insert('Where', ActiveQuery, Pos('And', ActiveQuery));
+        Delete(ActiveQuery, Pos('And', ActiveQuery), Length('And'));
+      end;
+    end;
+    for i := 0 to High(FilterPanels) do
+      With FilterPanels[i].ExecuteButton do
+        if k < Tag then
+          Tag := Tag - 1;
+    ChangeColumns(ATag);
+  end;
+  ActiveQuery := '';
+  Color := clRed;
+  ExecuteButton.Enabled := True;
+end;
 
 procedure TFilterPanel.ChangeValue(Sender: TObject);
 begin
@@ -232,11 +309,16 @@ var
                                               'like :', 'like :');
 
 begin
-  if Color = clGreen then
+  if not ExecuteButton.Enabled then
     exit;
+  With ListViewForm[Parent.Parent.Tag] do
+  begin
+    inc(ExecuteCount);
+    ExecuteButton.Tag := ExecuteCount;
+  end;
   Color := clYellow;
   ExecuteButton.Enabled := False;
-  With ListViewForm[Parent.Tag] do
+  With ListViewForm[Parent.Parent.Tag] do
   begin
     for i := 0 to DBGrid.Columns.Count - 1 do
       if DBGrid.Columns[i].Title.Caption = NameComboBox.Caption then
