@@ -23,8 +23,6 @@ type
     procedure ExecuteFilter(Sender: TObject);
     procedure ChangeValue(Sender: TObject);
     procedure CancelFilter(Sender: TObject);
-  private
-    ActiveQuery: String;
   end;
 
   { TListViewForm }
@@ -48,9 +46,11 @@ type
     constructor CreateAndShowForm(ATag: Integer);
     procedure DeleteFiltersButtonClick(Sender: TObject);
     procedure ExecuteFiltersButtonClick(Sender: TObject);
+    procedure MakeQuery();
   private
     FilterPanels: array of TFilterPanel;
-    ExecuteCount: Integer;
+    ExecuteCount, SortFieldTag, NumberOfColumns: Integer;
+    SortField, SortDesc: Boolean;
   end;
 
 
@@ -80,13 +80,58 @@ begin
       With SQLQuery do
       begin
         Active := False;
-        SQL.Text := SQLRequest.WriteQuery(ATag);
+        SQL.Text := SQLRequest.CreateQuery(ATag);
         Active := True;
       end;
       ChangeColumns(ATag);
     end;
   end;
   ListViewForm[ATag].Show;
+end;
+
+procedure TListViewForm.MakeQuery;
+var
+  Signs: array[0..NumberOfSigns] of string = ('< :', '> :', '= :', '<= :', '>= :',
+                                              'starts with :', 'containing :');
+  i, j: Integer;
+  AName: String;
+
+begin
+  With SQLQuery do
+  begin
+    Active := False;
+    Prepare;
+    SQL.Text := SQLRequest.CreateQuery(Self.Tag) ;
+    for i := 0 to High(FilterPanels) do
+      With FilterPanels[i] do
+        if not ExecuteButton.Enabled then
+        begin
+          for j := 0 to High(Tables.TablesInf[Self.Tag].Columns) do
+            With Tables.TablesInf[Self.Tag].Columns[j] do
+              if ReferenceTableName <> '' then
+              begin
+                if ReferenceColumnCaption = NameComboBox.Caption then
+                  AName := ReferenceTableName + '.' + ReferenceColumnSName;
+              end
+              else
+                if Caption = NameComboBox.Caption then
+                  AName := Self.Name + '.' + Name;
+          SQL.Text := SQLRequest.AddFilter(SQL.Text, AName,
+            Signs[SignComboBox.ItemIndex], IntToStr(Params.Count));
+          Params[Params.Count - 1].AsString :=  ValueEdit.Text;
+        end;
+    if SortField then
+    begin
+      With Tables.TablesInf[Self.Tag].Columns[SortFieldTag] do
+        if ReferenceTableName <> '' then
+          AName := ReferenceTableName + '.' + ReferenceColumnSName
+        else
+          AName := Self.Name + '.' + Name;
+      SQL.Text := SQLRequest.SortField(SQL.Text, AName, SortDesc);
+    end;
+    Active := True;
+  end;
+  ChangeColumns(Tag);
 end;
 
 procedure TListViewForm.DeleteFiltersButtonClick(Sender: TObject);
@@ -136,24 +181,24 @@ begin
 end;
 
 procedure TListViewForm.DBGridTitleClick(Column: TColumn);
-var
-  AName: String;
-
 begin
-  With Tables.TablesInf[Tag] do
+  if SortFieldTag <> Column.Tag then
   begin
-    if Columns[Column.Tag].ReferenceTableName <> '' then
-      AName := Columns[Column.Tag].ReferenceTableName + '.' + Column.FieldName
+    SortField := False;
+    SortDesc := False;
+  end;
+  if not SortField then
+    SortField := True
+  else
+    if SortDesc then
+    begin
+      SortField := False;
+      SortDesc := False
+    end
     else
-      AName := Name + '.' + Column.FieldName;
-  end;
-  With SQLQuery do
-  begin
-    Active := False;
-    SQL.Text := SQLRequest.SortField(SQL.Text, AName);
-    Active := True;
-  end;
-  ChangeColumns(Tag);
+      SortDesc := True;
+  SortFieldTag := Column.Tag;
+  MakeQuery;
 end;
 
 procedure TListViewForm.AddFilterButtonClick(Sender: TObject);
@@ -195,7 +240,7 @@ begin
 
     ValueEdit := CreateEdit;
 
-    ExecuteButton := CreateButton(352, 'Выполнить');
+    ExecuteButton := CreateButton(352, 'Применить');
     ExecuteButton.OnClick := @ExecuteFilter;
 
     CancelButton := CreateButton(432, 'Отменить');
@@ -239,59 +284,10 @@ end;
 { TFilterPanel }
 
 procedure TFilterPanel.CancelFilter(Sender: TObject);
-var
-  ATag, i, k: Integer;
-  m: Boolean;
-  c: Integer = -1;
-
 begin
-  if ActiveQuery = '' then
-    exit;
-  m := False;
-  ATag := Parent.Parent.Tag;
-  With ListViewForm[ATag].SQLQuery do
-  begin
-    Active := False;
-    SQL.Text := SQLRequest.DeleteFilter(SQL.Text, ActiveQuery);
-    Active := True;
-    ShowMessage(ActiveQuery);
-    ShowMessage(SQL.Text);
-  end;
-  k := ExecuteButton.Tag;
-  ExecuteButton.Tag := 0;
-  With ListViewForm[ATag] do
-  begin
-    Dec(ExecuteCount);
-    for i := 0 to High(FilterPanels) do
-      if FilterPanels[i].ExecuteButton.Tag = 1 then
-      begin
-        m := True;
-        Break;
-      end;
-    if not m then
-      for i := 0 to High(FilterPanels) do
-        if FilterPanels[i].ExecuteButton.Tag = 2 then
-        begin
-          c := i;
-          Break;
-        end;
-    if (c <> -1) and (not m) then
-    begin
-      With FilterPanels[c] do
-      begin
-        Insert('Where', ActiveQuery, Pos('And', ActiveQuery));
-        Delete(ActiveQuery, Pos('And', ActiveQuery), Length('And'));
-      end;
-    end;
-    for i := 0 to High(FilterPanels) do
-      With FilterPanels[i].ExecuteButton do
-        if k < Tag then
-          Tag := Tag - 1;
-    ChangeColumns(ATag);
-  end;
-  ActiveQuery := '';
   Color := clRed;
   ExecuteButton.Enabled := True;
+  ListViewForm[Parent.Parent.Tag].MakeQuery;
 end;
 
 procedure TFilterPanel.ChangeValue(Sender: TObject);
@@ -302,50 +298,9 @@ end;
 
 
 procedure TFilterPanel.ExecuteFilter(Sender: TObject);
-var
-  i: Integer;
-  AName: String;
-  Signs: array[0..NumberOfSigns] of string = ('< :', '> :', '= :', '<= :', '>= :',
-                                              'like :', 'like :');
-
 begin
-  if not ExecuteButton.Enabled then
-    exit;
-  With ListViewForm[Parent.Parent.Tag] do
-  begin
-    inc(ExecuteCount);
-    ExecuteButton.Tag := ExecuteCount;
-  end;
-  Color := clYellow;
   ExecuteButton.Enabled := False;
-  With ListViewForm[Parent.Parent.Tag] do
-  begin
-    for i := 0 to DBGrid.Columns.Count - 1 do
-      if DBGrid.Columns[i].Title.Caption = NameComboBox.Caption then
-        With Tables.TablesInf[Tag] do
-          if Columns[DBGrid.Columns[i].Tag].ReferenceTableName <> '' then
-            AName := Columns[DBGrid.Columns[i].Tag].ReferenceTableName + '.' +
-              Columns[DBGrid.Columns[i].Tag].ReferenceColumnSName
-          else
-            AName := Name + '.' + Columns[DBGrid.Columns[i].Tag].Name;
-    With SQLQuery do
-    begin
-      Active := False;
-      Prepare;
-      SQL.Text := SQLRequest.AddFilter(SQL.Text, AName,
-                    Signs[SignComboBox.ItemIndex], IntToStr(Params.Count),
-                    ActiveQuery);
-      if SignComboBox.ItemIndex = 5 then
-        Params[Params.Count - 1].AsString :=  ValueEdit.Text + '%'
-      else
-        if SignComboBox.ItemIndex = 6 then
-          Params[Params.Count - 1].AsString := '%' + ValueEdit.Text + '%'
-        else
-          Params[Params.Count - 1].AsString := ValueEdit.Text;
-      Active := True;
-    end;
-    ChangeColumns(Tag);
-  end;
+  ListViewForm[Parent.Parent.Tag].MakeQuery;
   Color := clGreen;
 end;
 
