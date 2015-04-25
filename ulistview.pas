@@ -6,7 +6,8 @@ interface
 
 uses
   Classes, SysUtils, sqldb, db, FileUtil, Forms, Controls, Graphics, Dialogs,
-  DBGrids, DbCtrls, Menus, StdCtrls, ExtCtrls, UMetaData, USQLRequest;
+  DBGrids, DbCtrls, Menus, StdCtrls, ExtCtrls, UMetaData, USQLRequest, Grids,
+  UChangeInformation;
 
 type
 
@@ -29,6 +30,7 @@ type
 
   TListViewForm = class(TForm)
     AddFilterButton: TButton;
+    ResetTabButton: TButton;
     CancelFiltersButton: TButton;
     DeleteFiltersButton: TButton;
     ExecuteFiltersButton: TButton;
@@ -38,22 +40,22 @@ type
     SQLQuery: TSQLQuery;
     DBGrid: TDBGrid;
     procedure AddFilterButtonClick(Sender: TObject);
+    procedure ResetTabButtonClick(Sender: TObject);
     procedure CancelFiltersButtonClick(Sender: TObject);
     procedure ChangeColumns(ATag: Integer);
+    procedure DBGridDblClick(Sender: TObject);
     procedure DBGridTitleClick(Column: TColumn);
     procedure DeleteFilter(Sender: TObject; Button: TMouseButton;
                            Shift: TShiftState; X, Y: Integer);
     constructor CreateAndShowForm(ATag: Integer);
     procedure DeleteFiltersButtonClick(Sender: TObject);
     procedure ExecuteFiltersButtonClick(Sender: TObject);
-    procedure MakeQuery();
+    procedure MakeQuery;
   private
     FilterPanels: array of TFilterPanel;
-    ExecuteCount, SortFieldTag, NumberOfColumns: Integer;
+    SortFieldTag: Integer;
     SortField, SortDesc: Boolean;
   end;
-
-
 
 Const indent = 37;
 Const NumberOfSigns = 6;
@@ -180,6 +182,12 @@ begin
     end;
 end;
 
+procedure TListViewForm.DBGridDblClick(Sender: TObject);
+begin
+  ResetQuery := @MakeQuery;
+  TChangeInfForm.CreateAndShowModule(Self, SQLQuery).ShowModal;
+end;
+
 procedure TListViewForm.DBGridTitleClick(Column: TColumn);
 begin
   if SortFieldTag <> Column.Tag then
@@ -249,6 +257,11 @@ begin
     DeleteButton := CreateButton(512, 'Удалить');
     DeleteButton.OnMouseUp := @DeleteFilter;
   end;
+end;
+
+procedure TListViewForm.ResetTabButtonClick(Sender: TObject);
+begin
+  MakeQuery;
 end;
 
 procedure TListViewForm.CancelFiltersButtonClick(Sender: TObject);

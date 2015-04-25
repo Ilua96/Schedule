@@ -5,7 +5,7 @@ unit USQLRequest;
 interface
 
 uses
-  Classes, SysUtils, UMetaData, Dialogs;
+  Classes, SysUtils, UMetaData, Dialogs, sqldb;
 
 type
 
@@ -15,6 +15,7 @@ type
     function CreateQuery(ATag: Integer): String;
     function SortField(AText, AName: String; ADesc: Boolean): String;
     function AddFilter(AText, AName, ASign, AParameter: String): String;
+    function QueryForChangeInf(ATag: Integer; ASQLQuery: TSQLQuery): String;
   end;
 
 var
@@ -70,6 +71,36 @@ begin
     Result := AText + 'Where ' + AName + ' ' + ASign + AParameter
   else
     Result := AText + 'And ' + AName + ' ' + ASign + AParameter;
+end;
+
+function TSQLRequest.QueryForChangeInf(ATag: Integer; ASQLQuery: TSQLQuery): String;
+var
+  i: Integer;
+  s: String = 'CAST(%s.%s AS VARCHAR(100)) = ''%s'' AND ';
+
+begin
+  Result := 'Select ';
+  With Tables.TablesInf[ATag] do
+  begin
+    for i := 0 to High(Columns) do
+      if Columns[i].Visible then
+        Result += Columns[i].Name + ','
+      else
+        if Columns[i].ReferenceColumnFName <> '' then
+          Result += Columns[i].Name + ',';
+    Delete(Result, Length(Result), 1);
+    Result += ' From ' + Name;
+    Result += ' Where ';
+    for i := 0 to High(Columns) do
+      if Columns[i].Visible then
+        Result += Format(s, [Name, Columns[i].Name,
+          ASQLQuery.FieldByName(Columns[i].Name).AsString])
+      else
+        if Columns[i].ReferenceColumnFName <> '' then
+          Result += Format(s, [Name, Columns[i].Name,
+            ASQLQuery.FieldByName(Columns[i].Name).AsString]);
+  end;
+  Delete(Result, Length(Result) - 4, 4);
 end;
 
 end.
