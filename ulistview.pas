@@ -7,7 +7,7 @@ interface
 uses
   Classes, SysUtils, sqldb, db, FileUtil, Forms, Controls, Graphics, Dialogs,
   DBGrids, DbCtrls, Menus, StdCtrls, ExtCtrls, UMetaData, USQLRequest, Grids,
-  UChangeInformation;
+  UEdit;
 
 type
 
@@ -30,7 +30,7 @@ type
 
   TListViewForm = class(TForm)
     AddFilterButton: TButton;
-    ResetTabButton: TButton;
+    AddRecButton: TButton;
     CancelFiltersButton: TButton;
     DeleteFiltersButton: TButton;
     ExecuteFiltersButton: TButton;
@@ -39,8 +39,9 @@ type
     ScrollBox: TScrollBox;
     SQLQuery: TSQLQuery;
     DBGrid: TDBGrid;
+    function KnowName(ATag: Integer): String;
     procedure AddFilterButtonClick(Sender: TObject);
-    procedure ResetTabButtonClick(Sender: TObject);
+    procedure AddRecButtonClick(Sender: TObject);
     procedure CancelFiltersButtonClick(Sender: TObject);
     procedure ChangeColumns(ATag: Integer);
     procedure DBGridDblClick(Sender: TObject);
@@ -51,10 +52,12 @@ type
     procedure DeleteFiltersButtonClick(Sender: TObject);
     procedure ExecuteFiltersButtonClick(Sender: TObject);
     procedure MakeQuery;
+    procedure EditClose(Sender: TObject; var CloseAction: TCloseAction);
   private
     FilterPanels: array of TFilterPanel;
     SortFieldTag: Integer;
     SortField, SortDesc: Boolean;
+    EditsForm: array of TEditForm;
   end;
 
 Const indent = 37;
@@ -91,10 +94,19 @@ begin
   ListViewForm[ATag].Show;
 end;
 
+function TListViewForm.KnowName(ATag: Integer): String;
+begin
+  With Tables.TablesInf[Self.Tag].Columns[ATag] do
+    if ReferenceTableName <> '' then
+      Result := ReferenceTableName + '.' + ReferenceColumnSName
+    else
+      Result := Self.Name + '.' + Name;
+end;
+
 procedure TListViewForm.MakeQuery;
 var
-  Signs: array[0..NumberOfSigns] of string = ('< :', '> :', '= :', '<= :', '>= :',
-                                              'starts with :', 'containing :');
+  Signs: array[0..NumberOfSigns] of string =
+    ('< :', '> :', '= :', '<= :', '>= :', 'starts with :', 'containing :');
   i, j: Integer;
   AName: String;
 
@@ -110,25 +122,16 @@ begin
         begin
           for j := 0 to High(Tables.TablesInf[Self.Tag].Columns) do
             With Tables.TablesInf[Self.Tag].Columns[j] do
-              if ReferenceTableName <> '' then
-              begin
-                if ReferenceColumnCaption = NameComboBox.Caption then
-                  AName := ReferenceTableName + '.' + ReferenceColumnSName;
-              end
-              else
-                if Caption = NameComboBox.Caption then
-                  AName := Self.Name + '.' + Name;
+              if (ReferenceColumnCaption = NameComboBox.Caption) or
+                 (Caption = NameComboBox.Caption) then
+                AName := KnowName(j);
           SQL.Text := SQLRequest.AddFilter(SQL.Text, AName,
             Signs[SignComboBox.ItemIndex], IntToStr(Params.Count));
           Params[Params.Count - 1].AsString :=  ValueEdit.Text;
         end;
     if SortField then
     begin
-      With Tables.TablesInf[Self.Tag].Columns[SortFieldTag] do
-        if ReferenceTableName <> '' then
-          AName := ReferenceTableName + '.' + ReferenceColumnSName
-        else
-          AName := Self.Name + '.' + Name;
+      AName := KnowName(SortFieldTag);
       SQL.Text := SQLRequest.SortField(SQL.Text, AName, SortDesc);
     end;
     Active := True;
@@ -162,7 +165,7 @@ var
 
 begin
   With Tables.TablesInf[ATag] do
-    While i <= High(Columns) do
+    for i := 0 to High(Columns) do
     begin
       DBGrid.Columns[j].Visible := Columns[i].Visible;
       DBGrid.Columns[j].FieldName := Columns[i].Name;
@@ -177,15 +180,33 @@ begin
         DBGrid.Columns[j].Width := Columns[i].ReferenceColumnWidth;
         DBGrid.Columns[j].Tag := i;
       end;
-      inc(i);
       inc(j);
     end;
 end;
 
 procedure TListViewForm.DBGridDblClick(Sender: TObject);
+var
+  i, IndexEdit: Integer;
+  BoolEdit: Boolean = False;
+
 begin
-  ResetQuery := @MakeQuery;
-  TChangeInfForm.CreateAndShowModule(Self, SQLQuery).ShowModal;
+  for i := 0 to High(EditsForm) do
+    if DBGrid.DataSource.DataSet.Fields[0].Value = EditsForm[i].Tag then
+    begin
+      IndexEdit := i;
+      BoolEdit := True;
+    end;
+  if not BoolEdit then
+  begin
+    SetLength(EditsForm, Length(EditsForm) + 1);
+    IndexEdit := High(EditsForm);
+    EditsForm[IndexEdit] := TEditForm.Create(Self);
+    EditsForm[IndexEdit].Tag := IndexEdit;
+    EditsForm[IndexEdit].OnClose := @EditClose;
+  end;
+  With EditsForm[IndexEdit] do
+    ShowForm(Self.Tag, DBGrid.DataSource.DataSet.Fields[0].Value,
+      Self.SQLQuery, False, DBGrid).Show;
 end;
 
 procedure TListViewForm.DBGridTitleClick(Column: TColumn);
@@ -212,8 +233,8 @@ end;
 procedure TListViewForm.AddFilterButtonClick(Sender: TObject);
 var
   i: Integer;
-  Signs: array[0..NumberOfSigns] of string = ('<', '>', '=', '<=', '>=',
-                                              'Начинается с', 'Включает');
+  Signs: array[0..NumberOfSigns] of string =
+    ('<', '>', '=', '<=', '>=', 'Начинается с', 'Включает');
 
 begin
   SetLength(FilterPanels, Length(FilterPanels) + 1);
@@ -259,9 +280,14 @@ begin
   end;
 end;
 
-procedure TListViewForm.ResetTabButtonClick(Sender: TObject);
+procedure TListViewForm.AddRecButtonClick(Sender: TObject);
 begin
-  MakeQuery;
+  SetLength(EditsForm, Length(EditsForm) + 1);
+  EditsForm[High(EditsForm)] := TEditForm.Create(Self);
+  EditsForm[IndexEdit].OnClose := @EditClose;
+  With EditsForm[High(EditsForm)] do
+    ShowForm(Self.Tag, DBGrid.DataSource.DataSet.Fields[0].Value, Self.SQLQuery,
+      True, DBGrid).Show;
 end;
 
 procedure TListViewForm.CancelFiltersButtonClick(Sender: TObject);
@@ -292,6 +318,23 @@ begin
     end;
   end;
   SetLength(FilterPanels, Length(FilterPanels) - 1);
+end;
+
+procedure TListViewForm.EditClose(Sender: TObject; var CloseAction: TCloseAction);
+var
+  i, j: Integer;
+
+begin
+  for i := (Sender as TForm).Tag to High(EditsForm) - 1 do
+    EditsForm[i] := EditsForm[i + 1];
+  SetLength(EditsForm, Length(EditsForm) - 1);
+  for i := 0 to High(ListViewForm) do
+    if ListViewForm[i] <> nil then
+    begin
+      ListViewForm[i].MakeQuery;
+      for j := 0 to High(EditsForm) do
+        ListViewForm[i].EditsForm[j].RefreshComboBox;
+    end;
 end;
 
 { TFilterPanel }

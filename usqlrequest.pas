@@ -55,9 +55,6 @@ begin
 end;
 
 function TSQLRequest.SortField(AText, AName: String; ADesc: Boolean): String;
-var
-  position: Integer;
-
 begin
   if ADesc then
     Result := AText + 'Order by ' + AName + ' Desc'
