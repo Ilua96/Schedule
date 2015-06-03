@@ -5,7 +5,7 @@ unit USQLRequest;
 interface
 
 uses
-  Classes, SysUtils, UMetaData, Dialogs, sqldb;
+  Classes, SysUtils, UMetaData, Dialogs, sqldb, UFilter;
 
 type
 
@@ -15,7 +15,7 @@ type
     function CreateQuery(ATag: Integer): String;
     function SortField(AText, AName: String; ADesc: Boolean): String;
     function AddFilter(AText, AName, ASign, AParameter: String): String;
-    function QueryForChangeInf(ATag: Integer; ASQLQuery: TSQLQuery): String;
+    procedure WriteFilters(ASQLQuery: TSQLQuery; AFilterListBox: TFilterListBox);
   end;
 
 var
@@ -70,34 +70,33 @@ begin
     Result := AText + 'And ' + AName + ' ' + ASign + AParameter;
 end;
 
-function TSQLRequest.QueryForChangeInf(ATag: Integer; ASQLQuery: TSQLQuery): String;
+procedure TSQLRequest.WriteFilters(ASQLQuery: TSQLQuery;
+  AFilterListBox: TFilterListBox);
 var
-  i: Integer;
-  s: String = 'CAST(%s.%s AS VARCHAR(100)) = ''%s'' AND ';
-
+  Signs: array[0..NumberOfSigns] of string =
+    ('< :', '> :', '= :', '<= :', '>= :', 'starts with :', 'containing :');
+  i, j: Integer;
+  AName: String;
 begin
-  Result := 'Select ';
-  With Tables.TablesInf[ATag] do
-  begin
-    for i := 0 to High(Columns) do
-      if Columns[i].Visible then
-        Result += Columns[i].Name + ','
-      else
-        if Columns[i].ReferenceColumnFName <> '' then
-          Result += Columns[i].Name + ',';
-    Delete(Result, Length(Result), 1);
-    Result += ' From ' + Name;
-    Result += ' Where ';
-    for i := 0 to High(Columns) do
-      if Columns[i].Visible then
-        Result += Format(s, [Name, Columns[i].Name,
-          ASQLQuery.FieldByName(Columns[i].Name).AsString])
-      else
-        if Columns[i].ReferenceColumnFName <> '' then
-          Result += Format(s, [Name, Columns[i].Name,
-            ASQLQuery.FieldByName(Columns[i].Name).AsString]);
-  end;
-  Delete(Result, Length(Result) - 4, 4);
+  for i := 0 to High(AFilterListBox.FilterPanels) do
+    With AFilterListBox.FilterPanels[i] do
+      if not ExecuteButton.Enabled then
+      begin
+        for j := 0 to High(Tables.TablesInf[AFilterListBox.Tag].Columns) do
+          With Tables.TablesInf[AFilterListBox.Tag].Columns[j] do
+            if (ReferenceColumnCaption = NameComboBox.Caption) or
+              (Caption = NameComboBox.Caption) then
+              if ReferenceTableName <> '' then
+                AName := ReferenceTableName + '.' + ReferenceColumnSName
+              else
+                Aname := Tables.TablesInf[AFilterListBox.Tag].Name + '.' + Name;
+        With ASQLQuery do
+        begin
+          SQL.Text := AddFilter(SQL.Text, AName,
+            Signs[SignComboBox.ItemIndex], IntToStr(Params.Count));
+          Params[Params.Count - 1].AsString :=  ValueEdit.Text;
+        end;
+      end;
 end;
 
 end.

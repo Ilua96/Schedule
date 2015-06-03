@@ -20,26 +20,23 @@ type
     DataSourceEdit: TDataSource;
     DeleteButton: TButton;
     SaveButton: TButton;
-    Data_Source: TDataSource;
-    SQLQuery: TSQLQuery;
     SQLQueryEdit: TSQLQuery;
     procedure AddButtonClick(Sender: TObject);
-    constructor ShowForm(ATag, ARecID: Integer; ASQLQuery: TSQLQuery;
-      AInsert: Boolean; ADBGrid: TDBGrid);
+    constructor ShowForm(ATag, ARecID: Integer; AStringList: TStringList;
+      AInsert: Boolean);
     function CreateEdit(AName, AText: String; ATop: Integer): TEdit;
-    function CreateDBLookupComboBox(ATop: Integer;
-      AListSource: TDataSource; AName, ADataField, AKeyField,
-      AListFiled: string): TDBLookupComboBox;
-    function CreateDataSource(ASQLQuery: TSQLQuery): TDataSource;
-    function CreateSQLQuery(AName: String): TSQLQuery;
+    function CreateComboBox(ATop, ATag: Integer; ASQLQuery: TSQLQuery): TComboBox;
+    function CreateSQLQuery(AFTag, ASTag: Integer): TSQLQuery;
     procedure DeleteButtonClick(Sender: TObject);
     procedure SaveButtonClick(Sender: TObject);
-    procedure RefreshComboBox;
+    procedure RefreshComboBox(ATag: Integer);
+  public
+    RecID: Integer;
   private
-    RecID, TagListView: Integer;
+    TagListView: Integer;
     Edits: array of TEdit;
-    ComboBoxs: array of TDBLookupComboBox;
-    ValuesComboBoxs: array of String;
+    ComboBoxs: array of TComboBox;
+    ValuesStringList: TStringList;
   end;
 
   Const indent = 37;
@@ -51,8 +48,8 @@ implementation
 
 {$R *.lfm}
 
-constructor TEditForm.ShowForm(ATag, ARecID: Integer; ASQLQuery: TSQLQuery;
-  AInsert: Boolean; ADBGrid: TDBGrid);
+constructor TEditForm.ShowForm(ATag, ARecID: Integer; AStringList: TStringList;
+  AInsert: Boolean);
 var
   i: Integer;
   j: Integer = 0;
@@ -63,6 +60,7 @@ begin
   RecID := ARecID;
   TagListView := ATag;
   Caption := 'Редактор записи';
+  ValuesStringList := AStringList;
   With Tables.TablesInf[ATag] do
   begin
     for i := 0 to High(Columns) do
@@ -70,7 +68,7 @@ begin
       begin
         SetLength(Edits, Length(Edits) + 1);
         Edits[High(Edits)] := CreateEdit(Columns[i].Name,
-          ADBGrid.DataSource.DataSet.Fields[i].Value, 5 + indent * j);
+          AStringList.Strings[i - 1], 5 + indent * j);
         inc(j);
       end
       else
@@ -78,23 +76,13 @@ begin
         if Columns[i].ReferenceTableName <> '' then
         begin
           SetLength(ComboBoxs, Length(ComboBoxs) + 1);
-          ComboBoxs[High(ComboBoxs)] := CreateDBLookupComboBox(5 + indent * j,
-            CreateDataSource(CreateSQLQuery(Columns[i].ReferenceTableName)),
-            Columns[i].ReferenceTableName, Columns[i].Name,
-            Columns[i].ReferenceColumnFName, Columns[i].ReferenceColumnSName);
+          ComboBoxs[High(ComboBoxs)] := CreateComboBox(5 + indent * j, i,
+            CreateSQLQuery(ATag, i));
+          ComboBoxs[High(ComboBoxs)].Text := AStringList.Strings[i - 1];
           inc(j);
         end;
       end;
   end;
-  With SQLQuery do
-  begin
-    Close;
-    SQL.Text := SQLRequest.QueryForChangeInf(ATag, ASQLQuery);
-    Open;
-  end;
-  SetLength(ValuesComboBoxs, Length(ComboBoxs));
-  for i := 0 to High(ComboBoxs) do
-    ValuesComboBoxs[i] := ComboBoxs[i].Text;
   if AInsert then
   begin
     SaveButton.Visible := False;
@@ -120,9 +108,10 @@ begin
     end;
     for i := 0 to High(ComboBoxs) do
     begin
-      SQL.Text := SQL.Text + '(Select ' + ComboBoxs[i].KeyField +
-        ' From ' + ComboBoxs[i].Name + ' Where ' +
-        ComboBoxs[i].ListField + ' = :' + IntToStr(Params.Count) + ')';
+      With Tables.TablesInf[TagListView].Columns[ComboBoxs[i].Tag] do
+      SQL.Text := SQL.Text + '(Select ' + ReferenceColumnFName +
+        ' From ' + ReferenceTableName + ' Where ' +
+        ReferenceColumnSName + ' = :' + IntToStr(Params.Count) + ')';
       Params[Params.Count - 1].AsString := ComboBoxs[i].Text;
       if i <> High(ComboBoxs) then
         SQL.Text := SQL.Text + ' , ';
@@ -166,9 +155,10 @@ begin
     end;
     for i := 0 to High(ComboBoxs) do
     begin
-      SQL.Text := SQL.Text + ComboBoxs[i].DataField + ' = ' + '(Select ' +
-        ComboBoxs[i].KeyField + ' From ' + ComboBoxs[i].Name + ' Where ' +
-        ComboBoxs[i].ListField + ' = :' + IntToStr(Params.Count) + ')';
+      With Tables.TablesInf[TagListView].Columns[ComboBoxs[i].Tag] do
+        SQL.Text := SQL.Text + Name + ' = ' + '(Select ' +
+          ReferenceColumnFName + ' From ' + ReferenceTableName + ' Where ' +
+          ReferenceColumnSName + ' = :' + IntToStr(Params.Count) + ')';
       Params[Params.Count - 1].AsString := ComboBoxs[i].Text;
       if i <> High(ComboBoxs) then
         SQL.Text := SQL.Text + ', ';
@@ -181,13 +171,30 @@ begin
   Close;
 end;
 
-procedure TEditForm.RefreshComboBox;
+procedure TEditForm.RefreshComboBox(ATag: Integer);
 var
-  i, j: Integer;
+  i: Integer;
+  j: Integer = 0;
 
 begin
-  for i := 0 to High(ComboBoxs) do
-    ComboBoxs[i].Text := ValuesComboBoxs[i];
+  With Tables.TablesInf[ATag] do
+    for i := 0 to High(Columns) do
+      if Columns[i].Visible then
+      begin
+        Edits[High(Edits)] := CreateEdit(Columns[i].Name,
+          ValuesStringList.Strings[i - 1], 5 + indent * j);
+        inc(j);
+      end
+      else
+      begin
+        if Columns[i].ReferenceTableName <> '' then
+        begin
+          ComboBoxs[High(ComboBoxs)] := CreateComboBox(5 + indent * j, i,
+            CreateSQLQuery(ATag, i));
+          ComboBoxs[High(ComboBoxs)].Text := ValuesStringList.Strings[i - 1];
+          inc(j);
+        end;
+      end;
 end;
 
 function TEditForm.CreateEdit(AName, AText: String; ATop: Integer): TEdit;
@@ -205,34 +212,30 @@ begin
   end;
 end;
 
-function TEditForm.CreateDBLookupComboBox(ATop: Integer;
-  AListSource: TDataSource; AName, ADataField, AKeyField,
-  AListFiled: string): TDBLookupComboBox;
+function TEditForm.CreateComboBox(ATop, ATag: Integer; ASQLQuery: TSQLQuery): TComboBox;
+var
+  i: Integer;
+
 begin
-  Result := TDBLookupComboBox.Create(Self);
+  Result := TComboBox.Create(Self);
   With Result do
   begin
-    Name := AName;
+    Tag := ATag;
     Left := 5;
     Top := ATop;
     Width := 226;
     Style := csDropDownList;
-    DataSource := Data_Source;
-    ListSource := AListSource;
-    DataField := ADataField;
-    KeyField := AKeyField;
-    ListField := AListFiled;
     Parent := Self;
+    With ASQLQuery do
+      for i := 0 to RecordCount - 1 do
+      begin
+        Items.Add(Fields[0].Value);
+        Next;
+      end;
   end;
 end;
 
-function TEditForm.CreateDataSource(ASQLQuery: TSQLQuery): TDataSource;
-begin
-  Result := TDataSource.Create(Self);
-  Result.DataSet := ASQLQuery;
-end;
-
-function TEditForm.CreateSQLQuery(AName: String): TSQLQuery;
+function TEditForm.CreateSQLQuery(AFTag, ASTag: Integer): TSQLQuery;
 begin
   Result := TSQLQuery.Create(Self);
   With Result do
@@ -240,7 +243,9 @@ begin
     Close;
     DataBase := MDDBConnection.IBConnection;
     Transaction := MDDBConnection.SQLTransaction;
-    SQL.Text := 'Select * From ' + AName;
+    With Tables.TablesInf[AFTag].Columns[ASTag] do
+      SQL.Text := 'Select ' + ReferenceTableName + '.' + ReferenceColumnSName +
+        ' From ' + ReferenceTableName;
     Open;
   end;
 end;

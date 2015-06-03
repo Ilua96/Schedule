@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, FileUtil, Forms, Controls, Graphics, Dialogs, Menus,
-  UMetaData, UListView, UAboutProgram;
+  UMetaData, UListView, UAboutProgram, USchedule;
 
 type
 
@@ -14,6 +14,7 @@ type
 
   TMenuForm = class(TForm)
     MainMenu: TMainMenu;
+    ScheduleMenu: TMenuItem;
     ReferenceMenu: TMenuItem;
     AboutTheProgramMenu: TMenuItem;
     ExitMenu: TMenuItem;
@@ -23,6 +24,7 @@ type
     procedure FormCreate(Sender: TObject);
     procedure MenuItemClick(Sender: TObject);
     procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
+    procedure ScheduleMenuClick(Sender: TObject);
   end;
 
 var
@@ -58,7 +60,6 @@ begin
     With MenuItem[i] do
     begin
       Tag := i;
-      Name := Tables.TablesInf[i].Name;
       Caption := Tables.TablesInf[i].Caption;
       OnClick := @MenuItemClick;
     end;
@@ -71,8 +72,14 @@ begin
   With (Sender as TMenuItem) do
   begin
     Checked := True;
-    TListViewForm.CreateAndShowForm(Tag);
-    ListViewForm[Tag].OnClose := @FormClose;
+    if ListViewForm[Tag] = nil then
+    begin
+      ListViewForm[Tag] := TListViewForm.Create(Self);
+      ListViewForm[Tag].CreateAndShowForm(Tag);
+      ListViewForm[Tag].OnClose := @FormClose;
+    end
+    else
+      ListViewForm[Tag].Show;
   end;
 end;
 
@@ -81,6 +88,11 @@ begin
   ReferenceMenu[(Sender as TForm).Tag].Checked := False;
   FreeAndNil(ListViewForm[(Sender as TForm).Tag]);
   CloseAction := caFree;
+end;
+
+procedure TMenuForm.ScheduleMenuClick(Sender: TObject);
+begin
+  ScheduleForm.Show;
 end;
 
 end.
