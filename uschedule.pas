@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, FileUtil, Forms, Controls, Graphics, Dialogs, Grids,
-  StdCtrls, CheckLst, DBGrids, ExtCtrls, UMetaData, sqldb, db, USQLRequest,
+  StdCtrls, CheckLst, ExtCtrls, UMetaData, sqldb, db, USQLRequest,
   UListView, UFilter, UEdit;
 
 type
@@ -30,7 +30,9 @@ type
     DrawGrid: TDrawGrid;
     EditIcon: TIcon;
     AddIcon: TIcon;
+    DelIcon: TIcon;
     procedure CheckListBoxItemClick(Sender: TObject; Index: integer);
+    procedure DrawGridDblClick(Sender: TObject);
     procedure DrawGridDrawCell(Sender: TObject; aCol, aRow: Integer;
       aRect: TRect; aState: TGridDrawState);
     procedure DrawGridMouseDown(Sender: TObject; Button: TMouseButton;
@@ -51,16 +53,19 @@ type
     procedure CreateIcon;
     procedure ShowEdit(ACol, ARow: Integer);
     procedure ShowAdd(ACol, ARow: Integer);
-    procedure DragAndDrop(AColF, ARowF, AColS, ARowS: Integer);
+    procedure ShowDel(ACol, ARow, ATag: Integer);
+    procedure DragAndDrop(AColL, ARowL, ACol, ARow: Integer);
+    procedure CreateAddAndDel;
+    procedure CloseAddAndDel(Sender: TObject; var CloseAction: TCloseAction);
   private
     ACols, ARows: array of String;
-    AFieldsList: array of array of TStringList;
+    ArrayRecID, AFieldsList: array of array of TStringList;
     FilterlistBox: TFilterListBox;
     Edits: array of TListViewForm;
-    Adds: array of TEditForm;
-    SelectedCol, SelectedRow: Integer;
+    AddAndDel: array of TEditForm;
+    SelectedCol, SelectedRow, aX, aY, HeighRecord, DragRecord: Integer;
     EditRect, AddRect: TRect;
-    aX, aY: Integer;
+    DelRect: array of TRect;
   end;
 
 const indent = 20;
@@ -77,14 +82,13 @@ implementation
 procedure TScheduleForm.ExecuteButtonClick(Sender: TObject);
 var
   i: Integer;
-  h: Integer = 0;
 
 begin
   FreeGrid;
   for i := 0 to CheckListBox.Count - 1 do
     if CheckListBox.Checked[i] then
-      h += DrawGrid.Canvas.TextHeight('I');
-  DrawGrid.DefaultRowHeight := h;
+      HeighRecord += DrawGrid.Canvas.TextHeight('I');
+  DrawGrid.DefaultRowHeight := HeighRecord;
   MakeQueryColOrRow(XComboBox.Text);
   FillCols;
   MakeQueryColOrRow(YComboBox.Text);
@@ -99,8 +103,10 @@ procedure TScheduleForm.CreateIcon;
 begin
   EditIcon := TIcon.Create;
   AddIcon := TIcon.Create;
+  DelIcon := TIcon.Create;
   Editicon.LoadFromFile('Icons\Edit.ico');
   AddIcon.LoadFromFile('Icons\Add.ico');
+  DelIcon.LoadFromFile('Icons\Del.ico');
 end;
 
 procedure TScheduleForm.FormCreate(Sender: TObject);
@@ -211,11 +217,18 @@ var
 
 begin
   SetLength(AFieldsList, Length(ACols));
+  SetLength(ArrayRecID, Length(ACols));
   for i := 0 to High(ACols) do
+  begin
+    SetLength(ArrayRecID[i], Length(ARows));
     SetLength(AFieldsList[i], Length(ARows));
+  end;
   for j := 0 to High(ACols) do
     for k := 0 to High(ARows) do
+    begin
+      ArrayRecID[j][k] := TStringList.Create;
       AFieldsList[j][k] := TStringList.Create;
+    end;
   With SQLQuery do
     for i := 0 to RecordCount - 1 do
     begin
@@ -225,6 +238,7 @@ begin
           if (ACols[j] = Fields[XComboBox.ItemIndex * 2 + 2].Value) and
             (ARows[k] = Fields[YComboBox.ItemIndex * 2 + 2].Value) then
           begin
+            ArrayRecID[j][k].Append(IntToStr(Fields[0].Value));
             With Tables.TablesInf[Self.Tag] do
               for l := 0 to High(Columns) - 1 do
                 if CheckListBox.Checked[l] then
@@ -244,17 +258,19 @@ begin
   SetLength(ARows, 0);
   SetLength(ACols, 0);
   SetLength(AFieldsList, 0);
+  SetLength(ArrayRecID, 0);
   With DrawGrid do
   begin
     ColCount := 1;
     RowCount := 1;
   end;
+  HeighRecord := 0;
 end;
 
 procedure TScheduleForm.DrawGridDrawCell(Sender: TObject; aCol, aRow: Integer;
   aRect: TRect; aState: TGridDrawState);
 var
-  i: Integer;
+  i, DelCount: Integer;
   function SaveRect(X, Y: Integer): TRect;
   begin
     Result.TopLeft := Point(X, Y);
@@ -271,14 +287,27 @@ begin
     if (aCol <> 0) and (aRow <> 0) then
     begin
       for i := 0 to AFieldsList[aCol - 1][aRow - 1].Count - 1 do
+      begin
         Canvas.TextOut(aRect.Left, aRect.Top + i * Canvas.TextHeight('I'),
           AFieldsList[aCol - 1][aRow - 1].ValueFromIndex[i]);
+      end;
       if (aCol = SelectedCol) and (aRow = SelectedRow) then
       begin
-        Canvas.Draw(aRect.Right - indent, ARect.Top, EditIcon);
+        Canvas.Draw(aRect.Right - indent, aRect.Top, EditIcon);
         EditRect := SaveRect(aRect.Right - indent ,ARect.Top);
-        Canvas.Draw(aRect.Right - indent, ARect.Top + indent, AddIcon);
+        Canvas.Draw(aRect.Right - indent, aRect.Top + indent, AddIcon);
         AddRect := SaveRect(aRect.Right - indent, ARect.Top + indent);
+        DelCount := (AFieldsList[aCol - 1][aRow - 1].Count - 1) div
+          (HeighRecord div Canvas.TextHeight('I'));
+        SetLength(DelRect, DelCount + 1);
+        if AFieldsList[aCol - 1][aRow - 1].Count <> 0 then
+          for i := 0 to DelCount do
+          begin
+            Canvas.Draw(aRect.Right - indent,
+              aRect.Top + indent * 2 + HeighRecord * i + Canvas.TextHeight('I') * i, DelIcon);
+            DelRect[i] := SaveRect(aRect.Right - indent,
+              aRect.Top + indent * 2 + HeighRecord * i + Canvas.TextHeight('I') * i);
+          end;
       end;
     end;
   end;
@@ -289,11 +318,34 @@ begin
   ExecuteButtonClick(Self);
 end;
 
+procedure TScheduleForm.DrawGridDblClick(Sender: TObject);
+var
+  aCol, aRow: Integer;
+
+begin
+  With DrawGrid do
+  begin
+    MouseToCell(aX, aY, aCol, aRow);
+    if RowHeights[aRow] <> 105 then
+      RowHeights[aRow] := 105
+    else
+      RowHeights[aRow] := (AFieldsList[aCol][arow].Count - 1) * Canvas.TextHeight('I');
+  end;
+end;
+
 procedure TScheduleForm.DrawGridMouseDown(Sender: TObject;
   Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+var
+  aCol, aRow, i: Integer;
+
 begin
   aX := X;
   aY := Y;
+  DrawGrid.MouseToCell(X, Y, aCol, aRow);
+  for i := 0 to ArrayRecID[aCol - 1][aRow - 1].Count - 2 do
+    if (Y - aRow * HeighRecord > i * HeighRecord) and
+       (Y - aRow * HeighRecord < (i + 1) * HeighRecord) then
+      DragRecord := i;
 end;
 
 procedure TScheduleForm.DrawGridMouseMove(Sender: TObject; Shift: TShiftState;
@@ -324,7 +376,7 @@ end;
 procedure TScheduleForm.DrawGridMouseUp(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
-  ACol, ARow, LastCol, LastRow: Integer;
+  ACol, ARow, LastCol, LastRow, i: Integer;
 
 begin
   DrawGrid.MouseToCell(X, Y, ACol, ARow);
@@ -343,12 +395,18 @@ begin
     ShowAdd(ACol, ARow);
     exit;
   end;
-  DrawGrid.MouseToCell(aX, aY, LastCol, LastRow);
-  if (LastCol <> 0) and (LastRow <> 0) and (LastRow <> ARow) and (LastCol <> ACol) then
+  for i := 0 to High(DelRect) do
+    if (DelRect[i].Left < X) and (DelRect[i].Right > X) and
+       (DelRect[i].Top < Y) and (DelRect[i].Bottom > Y) then
+    begin
+      ShowDel(ACol, ARow, i);
+      exit;
+    end;
+  if (LastCol <> 0) and (LastRow <> 0) and ((LastRow <> ARow) or (LastCol <> ACol)) then
   begin
     if (XComboBox.Text = YComboBox.Text) and (ACols[ACol] <> ARows[ARow]) then
       exit;
-    //DragAndDrop(ACol, ARow, LastCol, LastRow);
+    DragAndDrop(LastCol, LastRow, ACol, ARow);
   end;
 end;
 
@@ -363,14 +421,31 @@ begin
   end;
 end;
 
+procedure TScheduleForm.CreateAddAndDel;
+begin
+  SetLength(AddAndDel, Length(AddAndDel) + 1);
+  AddAndDel[High(AddAndDel)] := TEditForm.Create(Self);
+  AddAndDel[High(AddAndDel)].OnClose := @CloseAddAndDel;
+end;
+
+procedure TScheduleForm.CloseAddAndDel(Sender: TObject; var CloseAction: TCloseAction);
+var
+  i: Integer;
+
+begin
+  for i := (Sender as TForm).Tag to High(AddAndDel) - 1 do
+    AddAndDel[i] := AddAndDel[i + 1];
+  SetLength(AddAndDel, Length(AddAndDel) - 1);
+  RefreshGrid;
+end;
+
 procedure TScheduleForm.ShowAdd(ACol, ARow: Integer);
 var
-  i, k: Integer;
+  i, ARecID: Integer;
   AStringList: TStringList;
 
 begin
-  SetLength(Adds, Length(Adds) + 1);
-  Adds[High(Adds)] := TEditForm.Create(Self);
+  CreateAddAndDel;
   AStringList := TStringList.Create;
   for i := 0 to CheckListBox.Count - 1 do
     if XComboBox.Text = CheckListBox.Items[i] then
@@ -380,12 +455,58 @@ begin
         AStringList.Append(ARows[ARow - 1])
       else
         AStringList.Append('');
-  Adds[High(Adds)].ShowForm(Tag, k, AStringList, True).Show;
+  AddAndDel[High(AddAndDel)].ShowForm(Tag, ARecID, AStringList, True).Show;
 end;
 
-procedure TScheduleForm.DragAndDrop(AColF, ARowF, AColS, ARowS: Integer);
-begin
+procedure TScheduleForm.ShowDel(ACol, ARow, ATag: Integer);
+var
+  i, ARecID, AHeighRecord: Integer;
+  s: String;
+  AStringList: TStringList;
 
+begin
+  CreateAddAndDel;
+  AStringList := TStringList.Create;
+  AHeighRecord := HeighRecord div DrawGrid.Canvas.TextHeight('I');
+  for i := 0 to CheckListBox.Count - 1 do
+  begin
+    s := AFieldsList[ACol - 1][ARow - 1].Strings[i + ATag * (AHeighRecord + 1)];
+    if Pos(':', s) <> 0 then
+      Delete(s, 1, Length(s) - (Length(s) - Pos(':', s)));
+    AStringList.Append(s);
+  end;
+  ARecID := StrToInt(ArrayRecID[ACol - 1][ARow - 1].Strings[ATag]);
+  AddAndDel[High(AddAndDel)].ShowForm(Tag, ARecID, AStringList, False).Show;
+end;
+
+procedure TScheduleForm.DragAndDrop(AColL, ARowL, ACol, ARow: Integer);
+var
+  AStringList: TStringList;
+  AHeighRecord, i, ARecID: Integer;
+  s: String;
+
+begin
+  AStringList := TStringList.Create;
+  AHeighRecord := HeighRecord div DrawGrid.Canvas.TextHeight('I');
+  for i := 0 to CheckListBox.Count - 1 do
+    if XComboBox.Text = CheckListBox.Items[i] then
+      AStringList.Append(ACols[ACol - 1])
+    else
+      if YComboBox.Text = CheckListBox.Items[i] then
+        AStringList.Append(ARows[ARow - 1])
+      else
+      begin
+        s := AFieldsList[AColL - 1][ARowL - 1].Strings[i + DragRecord * (AHeighRecord + 1)];
+        if Pos(':', s) <> 0 then
+          Delete(s, 1, Length(s) - (Length(s) - Pos(':', s)));
+        AStringList.Append(s);
+      end;
+  SetLength(AddAndDel, Length(AddAndDel) + 1);
+  AddAndDel[High(AddAndDel)] := TEditForm.Create(Self);
+  ARecID := StrToInt(ArrayRecID[AColL - 1][ARowL - 1].Strings[DragRecord]);
+  AddAndDel[High(AddAndDel)].ShowForm(Tag, ARecID, AStringList, False);
+  AddAndDel[High(AddAndDel)].SaveButtonClick(Self);
+  ExecuteButtonClick(Self);
 end;
 
 end.
